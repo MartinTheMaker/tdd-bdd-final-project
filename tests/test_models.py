@@ -223,16 +223,32 @@ class TestProductModel(unittest.TestCase):
         # ----------- 2. Fehlerszenarien --------------------------------
         cases = [
             # fehlender Schlüssel
-            ({"description": "x","price": "1","available":True,"category":"FOOD"},
-             "Invalid product: missing name"),
-            # falscher Enum‑Wert
-            ({"name":"x","description":"y","price":"1","available":True,
-              "category":"NON_EXISTENT"},
-             "Invalid attribute:"),
+            (
+                {"description": "x", "price": "1", "available": True, "category": "FOOD"},
+                "Invalid product: missing name",
+            ),
+            # falscher Enum-Wert (führt zu AttributeError via getattr(Category, ...))
+            (
+                {
+                    "name": "x",
+                    "description": "y",
+                    "price": "1",
+                    "available": True,
+                    "category": "NON_EXISTENT",
+                },
+                "Invalid attribute:",
+            ),
             # falscher Typ für boolean
-            ({"name":"x","description":"y","price":"1","available":"yes",
-              "category":"FOOD"},
-             "Invalid type for boolean [available]:"),
+            (
+                {
+                    "name": "x",
+                    "description": "y",
+                    "price": "1",
+                    "available": "yes",
+                    "category": "FOOD",
+                },
+                "Invalid type for boolean [available]:",
+            ),
             # kein Mapping (TypeError)
             (None, "Invalid product: body of request contained bad or no data"),
             ("string", "Invalid product: body of request contained bad or no data"),
@@ -271,3 +287,14 @@ class TestProductModel(unittest.TestCase):
         self.assertIsNotNone(persisted)
         self.assertEqual(persisted.description, new_desc)
         self.assertEqual(persisted.id, prod.id)  # ID bleibt unverändert
+
+    def test_find_by_price_with_string(self):
+        """It should Find Products by Price when price is passed as a string"""
+        product = ProductFactory()
+        product.id = None
+        product.price = Decimal("19.99")
+        product.create()
+
+        found = Product.find_by_price(' "19.99" ')
+        self.assertEqual(found.count(), 1)
+        self.assertEqual(found.first().id, product.id)
