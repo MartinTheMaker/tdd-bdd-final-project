@@ -27,7 +27,7 @@ import os
 import logging
 import unittest
 from decimal import Decimal
-from service.models import Product, Category, db
+from service.models import Product, Category, db, DataValidationError
 from service import app
 from tests.factories import ProductFactory
 
@@ -189,3 +189,85 @@ class TestProductModel(unittest.TestCase):
         self.assertEqual(found.count(), count)
         for product in found:
             self.assertEqual(product.category, category)
+
+    def test_find_by_price(self):
+        """It should Find Products by Price"""
+        products = ProductFactory.create_batch(10)
+        for product in products:
+            product.create()
+        price = products[0].price
+        count = len([product for product in products if product.price == price])
+        found = Product.find_by_price(price)
+        self.assertEqual(found.count(), count)
+        for product in found:
+            self.assertEqual(product.price, price)
+
+    def test_deserialize(self):
+        """Tests the deserialize function"""
+        # ----------- 1. Erfolgsfall ------------------------------------
+        good_data = {
+            "name": "Kaffeemaschine",
+            "description": "Espresso‑Profi",
+            "price": "199.95",
+            "available": True,
+            "category": "AUTOMOTIVE",          # ein gültiger Enum‑Name
+        }
+        prod = Product()                       # leeres Objekt
+        self.assertIs(prod.deserialize(good_data), prod)   # zurück das selbe Objekt
+        self.assertEqual(prod.name, "Kaffeemaschine")
+        self.assertEqual(prod.description, "Espresso‑Profi")
+        self.assertEqual(prod.price, Decimal("199.95"))
+        self.assertTrue(prod.available)
+        self.assertEqual(prod.category, Category.AUTOMOTIVE)
+
+        # ----------- 2. Fehlerszenarien --------------------------------
+        cases = [
+            # fehlender Schlüssel
+            ({"description": "x","price": "1","available":True,"category":"FOOD"},
+             "Invalid product: missing name"),
+            # falscher Enum‑Wert
+            ({"name":"x","description":"y","price":"1","available":True,
+              "category":"NON_EXISTENT"},
+             "Invalid attribute:"),
+            # falscher Typ für boolean
+            ({"name":"x","description":"y","price":"1","available":"yes",
+              "category":"FOOD"},
+             "Invalid type for boolean [available]:"),
+            # kein Mapping (TypeError)
+            (None, "Invalid product: body of request contained bad or no data"),
+            ("string", "Invalid product: body of request contained bad or no data"),
+        ]
+
+        for payload, msg_part in cases:
+            with self.assertRaises(DataValidationError) as ctx:
+                Product().deserialize(payload)
+            self.assertIn(msg_part, str(ctx.exception))
+
+    def test_update_product_success_and_error(self):
+        """Tests the update function"""
+
+        # ---------- Fehlerfall: kein ID ----------
+        prod_no_id = ProductFactory()
+        prod_no_id.id = None                     # sicherstellen, dass kein PK gesetzt ist
+        prod_no_id.name = "Neuer Name"
+
+        with self.assertRaises(DataValidationError) as ctx:
+            prod_no_id.update()
+        self.assertIn("empty ID field", str(ctx.exception))
+
+        # ---------- Erfolgsfall ----------
+        # Erzeuge ein echtes DB‑Objekt
+        prod = ProductFactory()
+        prod.id = None
+        prod.create()                            # bekommt automatisch eine PK
+
+        # Ändere ein Attribut und speichere es
+        new_desc = "Beschreibung geändert"
+        prod.description = new_desc
+        prod.update()                            # commit
+
+        # Lade das Produkt neu aus der DB und prüfe die Änderung
+        persisted = Product.find(prod.id)
+        self.assertIsNotNone(persisted)
+        self.assertEqual(persisted.description, new_desc)
+        self.assertEqual(persisted.id, prod.id)  # ID bleibt unverändert
